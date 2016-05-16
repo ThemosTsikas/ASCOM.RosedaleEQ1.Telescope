@@ -1,23 +1,41 @@
 //tabs=4
+// This file is part of RosedaleEQ1.
+//
+// RosedaleEQ1 is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// RosedaleEQ1 is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with RosedaleEQ1. If not, see <http://www.gnu.org/licenses/>.
+//
 // --------------------------------------------------------------------------------
 // TODO fill in this information for your driver, then remove this line!
 //
 // ASCOM Telescope driver for RosedaleEQ1
 //
-// Description:	Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam 
-//				nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam 
-//				erat, sed diam voluptua. At vero eos et accusam et justo duo 
-//				dolores et ea rebum. Stet clita kasd gubergren, no sea takimata 
-//				sanctus est Lorem ipsum dolor sit amet.
+// Description:	A minimal Telescope driver to support autoguiding with PHD. Only 
+//              a few functions need implementing.
+//              We assume you already have an EQ1/EQ2 with the multispeed hand 
+//              controller.
+//              The hardware modification is explained in Guy Webb's 
+//              ArduinoAstroControl.pdf
+//              We will use the Arduino output pins 2 and 5 to "press" the East and 
+//              West buttons of the controller.
 //
-// Implements:	ASCOM Telescope interface version: <To be completed by driver developer>
-// Author:		(XXX) Your N. Here <your@email.here>
+// Implements:	ASCOM Telescope interface version: 3
+// Author:		(TTT) Themos Tsikas <themos.tsikas@gmail.com>
 //
 // Edit Log:
 //
 // Date			Who	Vers	Description
 // -----------	---	-----	-------------------------------------------------------
-// dd-mmm-yyyy	XXX	6.0.0	Initial edit, created from ASCOM driver template
+// 12-feb-2012	TTT	1.0.0	first working version
 // --------------------------------------------------------------------------------
 //
 
@@ -31,6 +49,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.Runtime.InteropServices;
+using System.IO.Ports;
+
 
 using ASCOM;
 using ASCOM.Astrometry;
@@ -69,19 +89,19 @@ namespace ASCOM.RosedaleEQ1
         /// <summary>
         /// Driver description that displays in the ASCOM Chooser.
         /// </summary>
-        private static string driverDescription = "ASCOM Telescope Driver for RosedaleEQ1.";
+        private static string driverDescription = "ASCOM Rosedale EQ1";
 
-        internal static string comPortProfileName = "COM Port"; // Constants used for Profile persistence
-        internal static string comPortDefault = "COM1";
-        internal static string traceStateProfileName = "Trace Level";
-        internal static string traceStateDefault = "false";
-
-        internal static string comPort; // Variables to hold the currrent device configuration
+        /// Flags whether the hardware is currently connected or not.
+        /// </summary>
+        private bool m_Connected = false;
+        public static SerialPort m_Port;        // the port the Arduino is on
 
         /// <summary>
-        /// Private variable to hold the connected state
+        /// Pulse guiding manager class.`
         /// </summary>
-        private bool connectedState;
+        private PulseGuider m_PulseGuider;
+        /// <summary>
+        private readonly AxisRates[] _axisRates;
 
         /// <summary>
         /// Private variable to hold an ASCOM Utilities object
@@ -104,12 +124,22 @@ namespace ASCOM.RosedaleEQ1
         /// </summary>
         public Telescope()
         {
+            // the rates constructors are only needed for the telescope class
+            // This can be removed for other driver types
+            _axisRates = new AxisRates[3];
+            _axisRates[0] = new AxisRates(TelescopeAxes.axisPrimary);
+            _axisRates[1] = new AxisRates(TelescopeAxes.axisSecondary);
+            _axisRates[2] = new AxisRates(TelescopeAxes.axisTertiary);
+            SharedResources.SharedSerial.PortName = Properties.Settings.Default.CommPortName;
+            SharedResources.SharedSerial.Speed = SerialSpeed.ps9600;
+            m_PulseGuider = new PulseGuider(false);
+
             tl = new TraceLogger("", "RosedaleEQ1");
-            ReadProfile(); // Read device configuration from the ASCOM Profile store
+            tl.Enabled = Properties.Settings.Default.TraceEnabled;
 
             tl.LogMessage("Telescope", "Starting initialisation");
 
-            connectedState = false; // Initialise connected to false
+            m_Connected = false; // Initialise connected to false
             utilities = new Util(); //Initialise util object
             astroUtilities = new AstroUtils(); // Initialise astro utilities object
             //TODO: Implement your additional construction here
@@ -134,7 +164,7 @@ namespace ASCOM.RosedaleEQ1
         {
             // consider only showing the setup dialog if not connected
             // or call a different dialog if connected
-            if (IsConnected)
+            if (m_Connected)
                 System.Windows.Forms.MessageBox.Show("Already connected, just press OK");
 
             using (SetupDialogForm F = new SetupDialogForm())
@@ -142,7 +172,11 @@ namespace ASCOM.RosedaleEQ1
                 var result = F.ShowDialog();
                 if (result == System.Windows.Forms.DialogResult.OK)
                 {
-                    WriteProfile(); // Persist device configuration values to the ASCOM Profile store
+                    Properties.Settings.Default.Save();
+                }
+                else
+                {
+                    Properties.Settings.Default.Reload();
                 }
             }
         }
@@ -164,31 +198,16 @@ namespace ASCOM.RosedaleEQ1
 
         public void CommandBlind(string command, bool raw)
         {
-            CheckConnected("CommandBlind");
-            // Call CommandString and return as soon as it finishes
-            this.CommandString(command, raw);
-            // or
             throw new ASCOM.MethodNotImplementedException("CommandBlind");
-            // DO NOT have both these sections!  One or the other
         }
 
         public bool CommandBool(string command, bool raw)
         {
-            CheckConnected("CommandBool");
-            string ret = CommandString(command, raw);
-            // TODO decode the return string and return true or false
-            // or
             throw new ASCOM.MethodNotImplementedException("CommandBool");
-            // DO NOT have both these sections!  One or the other
         }
 
         public string CommandString(string command, bool raw)
         {
-            CheckConnected("CommandString");
-            // it's a good idea to put all the low level communication with the device here,
-            // then all communication calls this function
-            // you need something to ensure that only one command is in progress at a time
-
             throw new ASCOM.MethodNotImplementedException("CommandString");
         }
 
@@ -203,38 +222,31 @@ namespace ASCOM.RosedaleEQ1
             astroUtilities.Dispose();
             astroUtilities = null;
         }
-
         public bool Connected
         {
             get
             {
-                LogMessage("Connected", "Get {0}", IsConnected);
-                return IsConnected;
+                LogMessage("Connected", "Get {0}", m_Connected);
+                return m_Connected;
             }
             set
             {
-                tl.LogMessage("Connected", "Set {0}", value);
-                if (value == IsConnected)
-                    return;
+                LogMessage("Connected", "Set {0}", value);
+                m_Connected = value;
+                SharedResources.SharedSerial.Connected = value;
+                if (m_Connected)
+                {
+                    m_Connected = SharedResources.SharedSerial.Connected;
+                    if (!m_Connected)
+                        throw new ASCOM.NotConnectedException("Could not connect to RosedaleEQ1 device!");
+                    LogMessage("Connected Set", "Connecting to port {0}", Properties.Settings.Default.CommPortName);
 
-                if (value)
-                {
-                    connectedState = true;
-                    LogMessage("Connected Set", "Connecting to port {0}", comPort);
-                    // TODO connect to the device
-                }
-                else
-                {
-                    connectedState = false;
-                    LogMessage("Connected Set", "Disconnecting from port {0}", comPort);
-                    // TODO disconnect from the device
                 }
             }
         }
 
         public string Description
         {
-            // TODO customise this device description
             get
             {
                 tl.LogMessage("Description Get", driverDescription);
@@ -246,9 +258,7 @@ namespace ASCOM.RosedaleEQ1
         {
             get
             {
-                Version version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                // TODO customise this driver description
-                string driverInfo = "Information about the driver itself. Version: " + String.Format(CultureInfo.InvariantCulture, "{0}.{1}", version.Major, version.Minor);
+                string driverInfo = "Experimental minimal Rosedale driver to support RA pulse guiding for an Arduino controlled RA multispeed motor equipped EQ1";
                 tl.LogMessage("DriverInfo Get", driverInfo);
                 return driverInfo;
             }
@@ -258,10 +268,7 @@ namespace ASCOM.RosedaleEQ1
         {
             get
             {
-                Version version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                string driverVersion = String.Format(CultureInfo.InvariantCulture, "{0}.{1}", version.Major, version.Minor);
-                tl.LogMessage("DriverVersion Get", driverVersion);
-                return driverVersion;
+                return "2.0.0";
             }
         }
 
@@ -270,7 +277,7 @@ namespace ASCOM.RosedaleEQ1
             // set by the driver wizard
             get
             {
-                LogMessage("InterfaceVersion Get", "3");
+                tl.LogMessage("InterfaceVersion Get", "3");
                 return Convert.ToInt16("3");
             }
         }
@@ -279,7 +286,7 @@ namespace ASCOM.RosedaleEQ1
         {
             get
             {
-                string name = "Short driver name - please customise";
+                string name = "Rosedale EQ1";
                 tl.LogMessage("Name Get", name);
                 return name;
             }
@@ -334,7 +341,7 @@ namespace ASCOM.RosedaleEQ1
         {
             get
             {
-                tl.LogMessage("AtHome", "Get - " + false.ToString());
+                tl.LogMessage("AtHome","Get - " + false.ToString());
                 return false;
             }
         }
@@ -351,7 +358,9 @@ namespace ASCOM.RosedaleEQ1
         public IAxisRates AxisRates(TelescopeAxes Axis)
         {
             tl.LogMessage("AxisRates", "Get - " + Axis.ToString());
-            return new AxisRates(Axis);
+            if (Axis == TelescopeAxes.axisPrimary) return _axisRates[0];
+            else if (Axis == TelescopeAxes.axisSecondary) return _axisRates[1];
+            else return _axisRates[2];
         }
 
         public double Azimuth
@@ -398,7 +407,7 @@ namespace ASCOM.RosedaleEQ1
             get
             {
                 tl.LogMessage("CanPulseGuide", "Get - " + false.ToString());
-                return false;
+                return true;
             }
         }
 
@@ -525,8 +534,7 @@ namespace ASCOM.RosedaleEQ1
             {
                 double declination = 0.0;
                 tl.LogMessage("Declination", "Get - " + utilities.DegreesToDMS(declination, ":", ":"));
-                return declination;
-            }
+                return declination;            }
         }
 
         public double DeclinationRate
@@ -619,11 +627,7 @@ namespace ASCOM.RosedaleEQ1
 
         public bool IsPulseGuiding
         {
-            get
-            {
-                tl.LogMessage("IsPulseGuiding Get", "Not implemented");
-                throw new ASCOM.PropertyNotImplementedException("IsPulseGuiding", false);
-            }
+            get { return m_PulseGuider.IsPulseGuiding; }
         }
 
         public void MoveAxis(TelescopeAxes Axis, double Rate)
@@ -640,8 +644,8 @@ namespace ASCOM.RosedaleEQ1
 
         public void PulseGuide(GuideDirections Direction, int Duration)
         {
-            tl.LogMessage("PulseGuide", "Not implemented");
-            throw new ASCOM.MethodNotImplementedException("PulseGuide");
+            tl.LogMessage("PulseGuide", Direction.ToString() + " " + Duration.ToString());
+            m_PulseGuider.RegisterInstruction(Direction, Duration);
         }
 
         public double RightAscension
@@ -747,8 +751,8 @@ namespace ASCOM.RosedaleEQ1
         {
             get
             {
-                tl.LogMessage("SiteLongitude Get", "Not implemented");
-                throw new ASCOM.PropertyNotImplementedException("SiteLongitude", false);
+                tl.LogMessage("SiteLongitude Get", 0.0.ToString());
+                return 0.0;
             }
             set
             {
@@ -881,9 +885,8 @@ namespace ASCOM.RosedaleEQ1
         {
             get
             {
-                tl.LogMessage("TrackingRate Get", "Not implemented");
-                throw new ASCOM.PropertyNotImplementedException("TrackingRate", false);
-            }
+                tl.LogMessage("TrackingRate Get", "driveSidereal");
+                return DriveRates.driveSidereal;            }
             set
             {
                 tl.LogMessage("TrackingRate Set", "Not implemented");
@@ -1009,52 +1012,19 @@ namespace ASCOM.RosedaleEQ1
         /// <summary>
         /// Returns true if there is a valid connection to the driver hardware
         /// </summary>
-        private bool IsConnected
-        {
-            get
-            {
-                // TODO check that the driver hardware connection exists and is connected to the hardware
-                return connectedState;
-            }
-        }
-
+     
         /// <summary>
         /// Use this function to throw an exception if we aren't connected to the hardware
         /// </summary>
         /// <param name="message"></param>
         private void CheckConnected(string message)
         {
-            if (!IsConnected)
+            if (!m_Connected)
             {
                 throw new ASCOM.NotConnectedException(message);
             }
         }
 
-        /// <summary>
-        /// Read the device configuration from the ASCOM Profile store
-        /// </summary>
-        internal void ReadProfile()
-        {
-            using (Profile driverProfile = new Profile())
-            {
-                driverProfile.DeviceType = "Telescope";
-                tl.Enabled = Convert.ToBoolean(driverProfile.GetValue(driverID, traceStateProfileName, string.Empty, traceStateDefault));
-                comPort = driverProfile.GetValue(driverID, comPortProfileName, string.Empty, comPortDefault);
-            }
-        }
-
-        /// <summary>
-        /// Write the device configuration to the  ASCOM  Profile store
-        /// </summary>
-        internal void WriteProfile()
-        {
-            using (Profile driverProfile = new Profile())
-            {
-                driverProfile.DeviceType = "Telescope";
-                driverProfile.WriteValue(driverID, traceStateProfileName, tl.Enabled.ToString());
-                driverProfile.WriteValue(driverID, comPortProfileName, comPort.ToString());
-            }
-        }
 
         /// <summary>
         /// Log helper function that takes formatted strings and arguments

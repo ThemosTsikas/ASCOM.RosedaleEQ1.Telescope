@@ -34,7 +34,7 @@ namespace ASCOM.RosedaleEQ1
             this.picASCOM = new System.Windows.Forms.PictureBox();
             this.label2 = new System.Windows.Forms.Label();
             this.chkTrace = new System.Windows.Forms.CheckBox();
-            this.comboBoxComPort = new System.Windows.Forms.ComboBox();
+            this.textBox1 = new System.Windows.Forms.TextBox();
             ((System.ComponentModel.ISupportInitialize)(this.picASCOM)).BeginInit();
             this.SuspendLayout();
             // 
@@ -96,6 +96,8 @@ namespace ASCOM.RosedaleEQ1
             // chkTrace
             // 
             this.chkTrace.AutoSize = true;
+            this.chkTrace.Checked = global::ASCOM.RosedaleEQ1.Properties.Settings.Default.TraceEnabled;
+            this.chkTrace.DataBindings.Add(new System.Windows.Forms.Binding("Checked", global::ASCOM.RosedaleEQ1.Properties.Settings.Default, "TraceEnabled", true, System.Windows.Forms.DataSourceUpdateMode.OnPropertyChanged));
             this.chkTrace.Location = new System.Drawing.Point(77, 118);
             this.chkTrace.Name = "chkTrace";
             this.chkTrace.Size = new System.Drawing.Size(69, 17);
@@ -103,20 +105,21 @@ namespace ASCOM.RosedaleEQ1
             this.chkTrace.Text = "Trace on";
             this.chkTrace.UseVisualStyleBackColor = true;
             // 
-            // comboBoxComPort
+            // textBox1
             // 
-            this.comboBoxComPort.FormattingEnabled = true;
-            this.comboBoxComPort.Location = new System.Drawing.Point(77, 87);
-            this.comboBoxComPort.Name = "comboBoxComPort";
-            this.comboBoxComPort.Size = new System.Drawing.Size(90, 21);
-            this.comboBoxComPort.TabIndex = 7;
+            this.textBox1.DataBindings.Add(new System.Windows.Forms.Binding("Text", global::ASCOM.RosedaleEQ1.Properties.Settings.Default, "CommPortName", true, System.Windows.Forms.DataSourceUpdateMode.OnPropertyChanged));
+            this.textBox1.Location = new System.Drawing.Point(77, 83);
+            this.textBox1.Name = "textBox1";
+            this.textBox1.Size = new System.Drawing.Size(100, 20);
+            this.textBox1.TabIndex = 7;
+            this.textBox1.Text = global::ASCOM.RosedaleEQ1.Properties.Settings.Default.CommPortName;
             // 
             // SetupDialogForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(350, 175);
-            this.Controls.Add(this.comboBoxComPort);
+            this.Controls.Add(this.textBox1);
             this.Controls.Add(this.chkTrace);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.picASCOM);
@@ -144,6 +147,6 @@ namespace ASCOM.RosedaleEQ1
         private System.Windows.Forms.PictureBox picASCOM;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.CheckBox chkTrace;
-        private System.Windows.Forms.ComboBox comboBoxComPort;
+        private System.Windows.Forms.TextBox textBox1;
     }
 }
